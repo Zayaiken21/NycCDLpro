@@ -1,0 +1,144 @@
+:root{
+  --paper:#f7f5ee;
+  --paper2:#fffdf8;
+  --card:#ffffff;
+  --ink:#1b2430;
+  --muted:#5b6b7c;
+  --line:#dcd5c2;
+  --accent:#c8431f;
+  --accent-soft:#f3d9cd;
+  --route:#1f6f4d;
+  --route-soft:#dcefe2;
+  --warn:#9a6b00;
+  --warn-soft:#f7ecd0;
+}
+
+.stApp{ background: var(--paper); color: var(--ink); }
+.block-container{ padding-top: 1.4rem; max-width: 1280px; }
+
+.hero{
+  display:flex; justify-content:space-between; gap:24px; align-items:stretch;
+  padding:32px 34px; border:1px solid var(--line); border-radius:18px;
+  background: linear-gradient(135deg, var(--paper2) 0%, #fff 60%);
+  box-shadow: 0 10px 30px rgba(27,36,48,.06);
+  margin-bottom: 22px; border-left: 8px solid var(--accent);
+}
+.hero h1{ font-size: 2.5rem; margin:.15rem 0 .5rem; letter-spacing:-0.5px; color: var(--ink); font-weight: 800; }
+.hero p{ font-size: 1.02rem; color: var(--muted); max-width: 760px; line-height:1.55; }
+.eyebrow{
+  color: var(--accent) !important; font-weight:900; letter-spacing:3px;
+  font-size:.74rem !important; text-transform: uppercase;
+}
+.hero-card{
+  min-width:220px; display:flex; flex-direction:column; justify-content:center;
+  border:1px solid var(--line); border-radius:14px; background: var(--route-soft);
+  padding:20px; color: var(--ink);
+}
+.hero-card span{ color: var(--muted); font-size:.8rem; }
+.hero-card strong{ font-size:1.6rem; color: var(--route); display:block; margin: 4px 0; }
+.hero-card small{ color: var(--muted); }
+
+.exit-badge{
+  display:inline-flex; align-items:center; gap:8px;
+  background: var(--route); color:#fff; font-weight:800;
+  border-radius:6px; padding:4px 10px; font-size:.82rem;
+  border: 2px solid #154d36;
+}
+.exit-badge .exit-num{
+  background:#fff; color: var(--route); border-radius:4px;
+  padding:1px 7px; font-weight:900;
+}
+.tag-pill{
+  display:inline-block; background: var(--accent-soft); color: var(--accent);
+  border-radius:20px; padding:3px 12px; font-size:.76rem; font-weight:800;
+  letter-spacing:.03em; margin-left:8px;
+}
+.section-eyebrow{
+  font-size:.74rem; font-weight:900; letter-spacing:3px; text-transform:uppercase;
+  color: var(--muted); margin: 28px 0 10px;
+  border-bottom: 2px solid var(--line); padding-bottom: 8px;
+}
+
+.metric-card, .study-card, .score-box, .ref-card, .state-card, .hazard-card{
+  border:1px solid var(--line); border-radius:16px; background: var(--card);
+  padding:20px; box-shadow: 0 6px 18px rgba(27,36,48,.05);
+}
+.metric-card{ text-align:center; min-height:135px; }
+.metric-card h2{ font-size:2.4rem; color: var(--route); margin:0; font-weight:800; }
+.metric-card p{ color: var(--muted); margin:.4rem 0 0; }
+.study-card{ margin:14px 0; line-height:1.7; }
+.score-box{ border-color: var(--route); background: var(--route-soft); margin:16px 0; text-align:center; }
+.score-box h2{ color: var(--route); font-size: 2.2rem; margin: 0; }
+
+.ref-card{ margin-bottom:14px; }
+.ref-card .ref-title{ font-weight:800; color: var(--ink); font-size:1.02rem; margin-bottom:4px; }
+.ref-card .ref-link{ font-size:.85rem; }
+
+.state-card{ margin-bottom:10px; }
+.state-card .state-name{ font-weight:800; font-size:1.05rem; color: var(--ink); }
+.state-card .state-note{ color: var(--muted); font-size:.92rem; margin-top:4px; line-height:1.5; }
+
+.hazard-card{ border-left: 5px solid var(--warn); background: var(--warn-soft); margin-bottom:10px; }
+.hazard-card .hazard-region{ font-weight:800; color: var(--ink); margin-bottom:3px; }
+.hazard-card .hazard-pattern{ color:#5b4600; font-size:.92rem; line-height:1.5; }
+
+.step-card{
+  display:flex; gap:14px; align-items:flex-start;
+  border:1px solid var(--line); border-radius:14px; background:var(--card);
+  padding:16px 18px; margin-bottom:10px;
+}
+.step-num{
+  flex-shrink:0; width:34px; height:34px; border-radius:50%;
+  background: var(--accent); color:#fff; font-weight:900;
+  display:flex; align-items:center; justify-content:center; font-size:.95rem;
+}
+.step-title{ font-weight:800; color: var(--ink); margin-bottom:3px; }
+.step-detail{ color: var(--muted); font-size:.92rem; line-height:1.5; }
+
+.stExpander{
+  border:1px solid var(--line) !important; border-radius:14px !important;
+  overflow:hidden; background: var(--card) !important;
+}
+section[data-testid="stSidebar"]{ background: var(--paper2); border-right:1px solid var(--line); }
+.stButton button, .stFormSubmitButton button{
+  border-radius:10px; border:1px solid var(--accent);
+  background: var(--accent); color:#fff; font-weight:800; padding:.7rem 1.2rem;
+}
+.stButton button:hover, .stFormSubmitButton button:hover{ background:#a83817; border-color:#a83817; }
+.stRadio label, .stCheckbox label{ color: var(--ink) !important; }
+a{ color: var(--route) !important; font-weight:600; }
+hr{ border-color: var(--line) !important; }
+
+@media (max-width:800px){
+  .hero{ flex-direction:column; padding:22px; }
+  .hero h1{ font-size:1.9rem; }
+  .hero-card{ min-width:0; }
+}
+
+/* Glossary-first Pro CDL upgrades */
+.glossary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px;margin:18px 0;}
+.glossary-card{border:1px solid var(--line);border-radius:16px;background:var(--card);padding:18px;box-shadow:0 6px 18px rgba(27,36,48,.05);}
+.glossary-card h3{margin:.1rem 0 .4rem;color:var(--ink);font-size:1.05rem;}
+.glossary-card p{color:var(--muted);font-size:.92rem;line-height:1.45;margin:.25rem 0;}
+.topic-chip{display:inline-flex;align-items:center;gap:6px;background:var(--route-soft);color:var(--route);font-weight:900;border-radius:999px;padding:4px 11px;font-size:.72rem;letter-spacing:.06em;text-transform:uppercase;margin-bottom:8px;}
+.source-pill{display:inline-block;background:#f2eee2;color:var(--muted);border:1px solid var(--line);border-radius:999px;padding:3px 9px;font-size:.72rem;font-weight:700;margin:3px 5px 3px 0;}
+.pro-definition{border-left:6px solid var(--route);background:var(--route-soft);padding:16px 18px;border-radius:14px;margin:12px 0 16px;line-height:1.65;}
+.key-list li{margin-bottom:8px;line-height:1.55;}
+.warning-box{border-left:6px solid var(--warn);background:var(--warn-soft);border-radius:14px;padding:14px 16px;margin:12px 0;color:#5b4600;}
+.quiz-category-card{border:1px solid var(--line);border-radius:14px;background:var(--paper2);padding:14px;margin-bottom:10px;}
+.quiz-category-card strong{color:var(--ink);}
+@media(max-width:720px){.hero{display:block;padding:22px}.hero-card{margin-top:14px;min-width:0}.hero h1{font-size:1.8rem}.block-container{padding-left:1rem;padding-right:1rem}.glossary-grid{grid-template-columns:1fr}}
+
+/* Glossary Pro additions */
+.topic-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;}
+.topic-head h2{margin:0;color:var(--ink);letter-spacing:-.4px;}
+.minute-pill{display:inline-block;background:var(--route-soft);color:var(--route);border:1px solid #bfdcc8;border-radius:999px;padding:3px 11px;font-size:.76rem;font-weight:800;}
+.definition-card{border:1px solid var(--line);border-left:6px solid var(--route);border-radius:14px;background:var(--paper2);padding:17px 18px;line-height:1.65;margin:12px 0 16px;}
+.fact-row{border:1px solid var(--line);background:var(--card);border-radius:12px;padding:10px 12px;margin-bottom:8px;line-height:1.45;box-shadow:0 4px 12px rgba(27,36,48,.04);}
+.pro-tip{border:1px solid #ead4ae;background:#fff8e8;border-left:5px solid var(--warn);border-radius:13px;padding:14px 16px;margin:14px 0;line-height:1.55;}
+.source-pill{display:inline-block;border:1px solid var(--line);background:var(--route-soft);color:var(--route);border-radius:999px;padding:6px 12px;margin:0 6px 8px 0;font-size:.82rem;font-weight:800;}
+.highlight-card{border:1px solid #e5cd74;background:#fff9d6;border-left:6px solid #d2a900;border-radius:14px;padding:15px 17px;margin:12px 0;line-height:1.6;}
+.highlight-card mark{background:#fff1a3;color:#1b2430;padding:2px 4px;border-radius:4px;}
+.highlight-card em{color:var(--muted);font-size:.8rem;}
+textarea, input{border-radius:10px!important;}
+@media (max-width: 760px){.hero{display:block;padding:22px}.hero h1{font-size:1.8rem}.hero-card{margin-top:14px;min-width:unset}.metric-card{margin-bottom:10px}}
