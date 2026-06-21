@@ -1,272 +1,364 @@
-from __future__ import annotations
-
-import json
-import random
-import uuid
-from datetime import date, datetime
-from pathlib import Path
 
 import streamlit as st
+import json, os, random, uuid, re
+from pathlib import Path
+from datetime import datetime, timezone
 
-from glossary_topics import (
-    GLOSSARY_TOPICS,
-    CATEGORY_ORDER,
-    topics_by_category,
-    total_study_minutes,
-    source_count,
-)
-from quiz_bank_glossary import all_topics, get_master_test, get_topic_quiz, total_question_count
-from state_nav import PRETRIP_WORKFLOW, NATIONAL_HAZARD_PATTERNS, get_state_list, get_state_info
+st.set_page_config(page_title="NYC CDL Pro Accessible Manual", page_icon="🛣️", layout="wide")
+BASE = Path(__file__).parent
+DATA_PATH = BASE / "data" / "cdl_manual_data.json"
+USER_DIR = BASE / "user_data"
+HIGHLIGHT_DIR = USER_DIR / "highlights"
+QUIZ_LOG_DIR = USER_DIR / "quiz_logs"
+SETTINGS_DIR = USER_DIR / "settings"
+for d in (HIGHLIGHT_DIR, QUIZ_LOG_DIR, SETTINGS_DIR):
+    d.mkdir(parents=True, exist_ok=True)
 
-APP_DIR = Path(__file__).resolve().parent
-STYLES_PATH = APP_DIR / "styles" / "cdl_pro.css"
-HIGHLIGHT_DIR = APP_DIR / "user_data" / "highlights"
-HIGHLIGHT_DIR.mkdir(parents=True, exist_ok=True)
+with open(BASE / "styles" / "cdl_pro.css", "r", encoding="utf-8") as f:
+    st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
 
-st.set_page_config(page_title="CDL Glossary Pro", page_icon="🛣️", layout="wide")
+@st.cache_data
+def load_data():
+    with open(DATA_PATH, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-if STYLES_PATH.exists():
-    st.markdown(f"<style>{STYLES_PATH.read_text(encoding='utf-8')}</style>", unsafe_allow_html=True)
-else:
-    st.warning("CSS file missing. Put cdl_pro.css inside the styles folder.")
+data = load_data()
+items = data["items"]
+facts = data["facts"]
+questions = data["questions"]
 
-if "session_uid" not in st.session_state:
-    st.session_state.session_uid = uuid.uuid4().hex[:12]
-if "current_quiz_key" not in st.session_state:
-    st.session_state.current_quiz_key = None
-if "current_quiz_questions" not in st.session_state:
-    st.session_state.current_quiz_questions = []
+# ───────────────────────── Session / device identity ─────────────────────────
+def init_state():
+    defaults = {
+        "reader_size": 22,
+        "session_id": uuid.uuid4().hex[:12],
+        "device_id": None,
+        "device_name": "My Device",
+        "quiz": [],
+        "answers": {},
+        "quiz_started_at": None,
+        "quiz_submitted_at": None,
+        "quiz_elapsed_seconds": 0,
+        "quiz_topic": "All Topics",
+        "highlight_color": "#fff2a8",
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
+init_state()
 
-def highlight_file() -> Path:
-    return HIGHLIGHT_DIR / f"{st.session_state.session_uid}.json"
+# Keep one local device id on the server. In deployed Streamlit this is still server-side JSON,
+# but it creates stable, separate logs/highlights for each chosen device profile.
+def set_device_profile(name: str):
+    safe = re.sub(r"[^a-zA-Z0-9_-]+", "_", (name or "device").strip())[:40] or "device"
+    st.session_state.device_name = name.strip() or "My Device"
+    st.session_state.device_id = safe.lower()
+    save_settings()
 
+def settings_file():
+    did = st.session_state.device_id or st.session_state.session_id
+    return SETTINGS_DIR / f"settings_{did}.json"
 
-def load_highlights() -> list[dict]:
-    path = highlight_file()
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except json.JSONDecodeError:
-        return []
+def save_settings():
+    payload = {
+        "device_id": st.session_state.device_id,
+        "device_name": st.session_state.device_name,
+        "highlight_color": st.session_state.highlight_color,
+        "reader_size": st.session_state.reader_size,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+    settings_file().write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
+def owner_id():
+    return st.session_state.device_id or st.session_state.session_id
 
-def save_highlights(items: list[dict]) -> None:
-    highlight_file().write_text(json.dumps(items, indent=2, ensure_ascii=False), encoding="utf-8")
+def hfile():
+    return HIGHLIGHT_DIR / f"highlights_{owner_id()}.json"
 
+def quiz_log_file():
+    return QUIZ_LOG_DIR / f"quiz_log_{owner_id()}.json"
 
-def add_highlight(topic_title: str, selected_text: str, note: str) -> bool:
-    selected_text = selected_text.strip()
-    note = note.strip()
-    if not selected_text:
-        return False
-    items = load_highlights()
-    items.append({
-        "id": uuid.uuid4().hex[:10],
-        "topic": topic_title,
-        "text": selected_text,
-        "note": note,
-        "created_at": datetime.now().isoformat(timespec="seconds"),
+def load_json(path: Path, default):
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return default
+    return default
+
+def write_json(path: Path, payload):
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+def load_highlights():
+    return load_json(hfile(), [])
+
+def save_highlight(card, text, note=""):
+    hs = load_highlights()
+    hs.append({
+        "time": datetime.now().isoformat(timespec="seconds"),
+        "session_id": st.session_state.session_id,
+        "device_id": owner_id(),
+        "device_name": st.session_state.device_name,
+        "card_id": card["id"],
+        "title": card["title"],
+        "topic": card["topic"],
+        "source": card["source"],
+        "page": card["page"],
+        "color": st.session_state.highlight_color,
+        "text": text.strip(),
+        "note": note.strip(),
     })
-    save_highlights(items)
-    return True
+    write_json(hfile(), hs)
 
+def clear_highlights():
+    write_json(hfile(), [])
 
-def delete_highlight(item_id: str) -> None:
-    items = [x for x in load_highlights() if x.get("id") != item_id]
-    save_highlights(items)
+def load_quiz_logs():
+    return load_json(quiz_log_file(), [])
 
+def save_quiz_log(score, total, pct, topic, elapsed_seconds, review):
+    logs = load_quiz_logs()
+    logs.append({
+        "time_started": st.session_state.quiz_started_at,
+        "time_submitted": datetime.now().isoformat(timespec="seconds"),
+        "session_id": st.session_state.session_id,
+        "device_id": owner_id(),
+        "device_name": st.session_state.device_name,
+        "topic": topic,
+        "score": score,
+        "total": total,
+        "percent": pct,
+        "elapsed_seconds": elapsed_seconds,
+        "elapsed_label": format_seconds(elapsed_seconds),
+        "review": review,
+    })
+    write_json(quiz_log_file(), logs)
 
-def render_topic(topic: dict) -> None:
-    saved_for_topic = [h for h in load_highlights() if h.get("topic") == topic["title"]]
-    badge = f"<span class='tag-pill'>{topic['category']}</span>"
-    st.markdown(
-        f"<div class='topic-head'><h2>{topic['title']}</h2>{badge}<span class='minute-pill'>~{topic.get('minutes', 0)} min</span></div>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(f"<div class='definition-card'><b>Clean definition:</b><br>{topic['definition']}</div>", unsafe_allow_html=True)
+def format_seconds(seconds):
+    seconds = int(seconds or 0)
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    if h:
+        return f"{h}h {m}m {s}s"
+    return f"{m}m {s}s"
 
-    c1, c2 = st.columns([1.1, .9])
-    with c1:
-        st.markdown("#### Must know")
-        for item in topic.get("must_know", []):
-            st.markdown(f"<div class='fact-row'>✓ {item}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='pro-tip'><b>Pro tip:</b> {topic.get('pro_tip', '')}</div>", unsafe_allow_html=True)
-        st.caption(f"Duplicate alignment: {topic.get('duplicate_notes', 'Merged overlapping manual content into one clean topic.')}")
-    with c2:
-        st.markdown("#### Sources combined")
-        for src in topic.get("sources", []):
-            st.markdown(f"<div class='source-pill'>{src}</div>", unsafe_allow_html=True)
-        st.markdown("#### Highlight this topic")
-        with st.form(f"highlight_{topic['id']}"):
-            selected = st.text_area("Paste the favorite part you want to highlight", height=120, placeholder="Copy/paste the sentence, rule, or checklist item here...")
-            note = st.text_input("Optional note", placeholder="Why this matters to me...")
-            submitted = st.form_submit_button("Save Highlight")
-        if submitted:
-            if add_highlight(topic["title"], selected, note):
-                st.success("Highlight saved to this Streamlit session JSON.")
+def current_elapsed():
+    if not st.session_state.quiz_started_at:
+        return 0
+    try:
+        start = datetime.fromisoformat(st.session_state.quiz_started_at)
+        return int((datetime.now() - start).total_seconds())
+    except Exception:
+        return 0
+
+# ───────────────────────── Data helpers ─────────────────────────
+def topic_list():
+    return sorted(set(i["topic"] for i in items))
+
+def filter_items(topic, search):
+    arr = [i for i in items if topic == "All Topics" or i["topic"] == topic]
+    if search:
+        s = search.lower()
+        arr = [i for i in arr if s in i["title"].lower() or s in i["body"].lower() or s in i["topic"].lower()]
+    return arr
+
+def all_sources():
+    return sorted(set(i["source"] for i in items))
+
+# ───────────────────────── Render helpers ─────────────────────────
+def render_card(card):
+    st.markdown(f"""
+    <div class='reader-card'>
+      <span class='topic-chip'>{card['topic']}</span>
+      <span class='source-chip'>{card['source']} · page {card['page']}</span>
+      <h2>{card['title']}</h2>
+      <div class='reader-text'>{card['body']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    with st.expander("⭐ Highlight a favorite part from this card"):
+        st.caption("Copy/paste the exact sentence or paragraph you want to save. It saves only to this device/session JSON file.")
+        txt = st.text_area("Text to highlight", key=f"hl_txt_{card['id']}", height=110)
+        note = st.text_input("Optional note", key=f"hl_note_{card['id']}")
+        st.markdown(f"<div class='highlight-preview' style='background:{st.session_state.highlight_color};'>Preview highlight color</div>", unsafe_allow_html=True)
+        if st.button("Save highlight", key=f"save_{card['id']}"):
+            if txt.strip():
+                save_highlight(card, txt, note)
+                st.success("Highlight saved to JSON for this device/session.")
             else:
-                st.error("Paste text first, then save the highlight.")
+                st.warning("Paste the text you want to highlight first.")
 
-    if saved_for_topic:
-        st.markdown("#### Your saved highlights for this topic")
-        for h in saved_for_topic:
-            st.markdown(f"<div class='highlight-card'><mark>{h['text']}</mark><br><small>{h.get('note','')}</small><br><em>{h['created_at']}</em></div>", unsafe_allow_html=True)
-            if st.button("Delete", key=f"del_{h['id']}"):
-                delete_highlight(h["id"])
-                st.rerun()
-
-
-st.markdown(f"""
-<div class="hero">
-  <div>
-    <p class="eyebrow">NYC CDL GLOSSARY PRO</p>
-    <h1>Glossary-First CDL Study Center</h1>
-    <p>Instead of a long curriculum list, this app breaks the CDL knowledge into glossary topics. Duplicate handbook sections are merged into one clean source of truth, with matching quizzes, sources, navigation tools, and session-only JSON highlights.</p>
-  </div>
-  <div class="hero-card">
-    <span>Study Date</span>
-    <strong>{date.today().strftime('%b %d, %Y')}</strong>
-    <small>Session: {st.session_state.session_uid}</small>
-  </div>
-</div>
-""", unsafe_allow_html=True)
-
-page = st.sidebar.radio(
-    "CDL Pro Menu",
-    ["Dashboard", "Glossary Topics", "Practice Tests", "My Highlights", "Navigation Center", "Pre-Trip Planner", "Readiness Checklist", "Official Sources"],
-)
-st.sidebar.caption("Highlights are unique to this browser Streamlit session and saved in user_data/highlights as JSON.")
-
-if page == "Dashboard":
-    cards = [
-        (str(len(GLOSSARY_TOPICS)), "Glossary topics"),
-        (str(total_question_count()), "Quiz questions"),
-        (str(source_count()), "Source groups merged"),
-        (str(total_study_minutes()), "Study minutes"),
-    ]
-    cols = st.columns(4)
-    for col, (num, label) in zip(cols, cards):
-        col.markdown(f"<div class='metric-card'><h2>{num}</h2><p>{label}</p></div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="section-eyebrow">How this is organized</div>', unsafe_allow_html=True)
-    st.markdown("""
-    <div class="study-card">
-      <p><b>Glossary-first:</b> each CDL topic is a focused study card with the definition, must-know rules, source alignment, duplicate-combine notes, and a pro-driver takeaway.</p>
-      <p><b>Quiz matched:</b> every glossary topic has its own quiz category, plus a master test that mixes everything.</p>
-      <p><b>Highlight system:</b> paste any favorite sentence/rule into the highlight box and it saves to your session JSON, so each user/browser session gets its own saved highlights.</p>
+def render_timer_box():
+    elapsed = current_elapsed()
+    st.markdown(f"""
+    <div class='timer-box'>
+      <div class='timer-label'>Quiz Timer</div>
+      <div class='timer-time'>{format_seconds(elapsed)}</div>
+      <div class='timer-note'>Timer starts when you build a quiz and saves to JSON when you submit.</div>
     </div>
     """, unsafe_allow_html=True)
 
-elif page == "Glossary Topics":
-    st.markdown("## Glossary Topics")
-    query = st.text_input("Search topics", placeholder="air brakes, hazmat, cargo, low bridges...")
-    grouped = topics_by_category()
-    for category in CATEGORY_ORDER:
-        topics = grouped.get(category, [])
-        if query:
-            q = query.lower()
-            topics = [t for t in topics if q in t["title"].lower() or q in t["definition"].lower() or any(q in x.lower() for x in t.get("must_know", []))]
-        if not topics:
-            continue
-        st.markdown(f'<div class="section-eyebrow">{category}</div>', unsafe_allow_html=True)
-        for topic in topics:
-            with st.expander(topic["title"], expanded=False):
-                render_topic(topic)
+# ───────────────────────── Header / Sidebar ─────────────────────────
+st.markdown("""
+<div class='big-hero'>
+  <div class='eyebrow'>NYC CDL PRO · ACCESSIBLE MANUAL</div>
+  <h1>Complete CDL PDF Study Reader</h1>
+  <p>Every extracted CDL manual page is broken into large, clean study cards. Use bigger text, search every topic, save colored highlights to JSON, and take timed quizzes built from the real manual facts, numbers, ages, pressures, distances, and CDL rules.</p>
+</div>
+""", unsafe_allow_html=True)
 
-elif page == "Practice Tests":
-    st.markdown("## Practice Tests")
-    mode = st.radio("Choose test type", ["Master Test", "Per-Topic Quiz"], horizontal=True)
-    if mode == "Master Test":
-        quiz_key = "master"
-        if st.button("Shuffle & Start Master Test", type="primary") or st.session_state.current_quiz_key != quiz_key:
-            questions = get_master_test()
-            random.shuffle(questions)
-            st.session_state.current_quiz_key = quiz_key
-            st.session_state.current_quiz_questions = questions
+st.sidebar.title("CDL Pro")
+page = st.sidebar.radio("Open", ["Dashboard", "Accessible Reader", "Facts & Numbers", "Practice Quizzes", "My Highlights", "Quiz History", "Source Coverage"])
+st.sidebar.markdown("---")
+with st.sidebar.expander("⚙️ Reading + highlight settings", expanded=True):
+    name = st.text_input("Device / user log name", value=st.session_state.device_name, help="This name becomes the JSON owner for highlights and quiz logs on this machine/server.")
+    if st.button("Use this device name"):
+        set_device_profile(name)
+        st.success("Device profile saved.")
+    st.session_state.reader_size = st.slider("Reader text size", 18, 38, st.session_state.reader_size)
+    st.session_state.highlight_color = st.color_picker("Highlight color", st.session_state.highlight_color)
+    if st.button("Save reading settings"):
+        save_settings()
+        st.success("Settings saved.")
+    st.markdown(f"<div class='highlight-preview' style='background:{st.session_state.highlight_color};'>Highlight preview</div>", unsafe_allow_html=True)
+
+st.markdown(f"<style>.reader-text{{--reader-size:{st.session_state.reader_size}px;}}</style>", unsafe_allow_html=True)
+st.sidebar.caption(f"Session ID: {st.session_state.session_id}")
+st.sidebar.caption(f"JSON owner: {owner_id()}")
+
+# ───────────────────────── Pages ─────────────────────────
+if page == "Dashboard":
+    m = data['meta']
+    st.markdown("<div class='metric-grid'>" + "".join([
+        f"<div class='metric'><strong>{len(topic_list())}</strong><span>Manual topics</span></div>",
+        f"<div class='metric'><strong>{m['unique_cards']}</strong><span>Readable study cards</span></div>",
+        f"<div class='metric'><strong>{m['fact_count']}</strong><span>Extracted rule facts</span></div>",
+        f"<div class='metric'><strong>{m['question_count']}</strong><span>Practice questions</span></div>",
+    ]) + "</div>", unsafe_allow_html=True)
+    st.markdown("""
+    <div class='reader-card'><h2>Built for visual accessibility</h2>
+    <div class='reader-text'>The original CDL PDFs are packed into small columns. This app converts the material into large, high-contrast cards with adjustable text size, bigger spacing, search, topic filters, and separate fact/number study mode. Highlights and quiz timing save to JSON so each device profile can keep its own progress.</div></div>
+    """, unsafe_allow_html=True)
+
+elif page == "Accessible Reader":
+    st.subheader("Accessible Reader")
+    c1, c2, c3 = st.columns([2,2,1])
+    with c1:
+        topic = st.selectbox("Topic", ["All Topics"] + topic_list())
+    with c2:
+        search = st.text_input("Search manual text", placeholder="air pressure, age, hazmat, 4/32, passengers...")
+    with c3:
+        limit = st.number_input("Cards", 5, 500, 25)
+    arr = filter_items(topic, search)
+    st.caption(f"Showing {min(len(arr), limit)} of {len(arr)} matching cards")
+    for card in arr[:limit]:
+        render_card(card)
+
+elif page == "Facts & Numbers":
+    st.subheader("Rules, numbers, ages, pressures, distances, and key facts")
+    topic = st.selectbox("Filter topic", ["All Topics"] + topic_list(), key="fact_topic")
+    s = st.text_input("Search facts", key="fact_search")
+    arr = [f for f in facts if topic == "All Topics" or f['topic'] == topic]
+    if s:
+        arr = [f for f in arr if s.lower() in f['fact'].lower()]
+    st.caption(f"{len(arr)} matching facts")
+    for f in arr[:600]:
+        st.markdown(f"<div class='fact-box'><b>{f['topic']}</b><br>{f['fact']}<br><span class='small-note'>{f['source']} · page {f['page']}</span></div>", unsafe_allow_html=True)
+
+elif page == "Practice Quizzes":
+    st.subheader("Timed Practice Quizzes")
+    c1, c2 = st.columns([2,1])
+    with c1:
+        topic = st.selectbox("Quiz category", ["All Topics"] + topic_list())
+    with c2:
+        count = st.slider("Questions", 5, 50, 15)
+
+    if st.button("Build new timed quiz", type="primary"):
+        pool = [q for q in questions if topic == "All Topics" or q['topic'] == topic]
+        random.shuffle(pool)
+        st.session_state.quiz = pool[:count]
+        st.session_state.answers = {}
+        st.session_state.quiz_started_at = datetime.now().isoformat(timespec="seconds")
+        st.session_state.quiz_submitted_at = None
+        st.session_state.quiz_elapsed_seconds = 0
+        st.session_state.quiz_topic = topic
+        st.rerun()
+
+    if not st.session_state.quiz:
+        st.info("Click Build new timed quiz to start the timer.")
     else:
-        topic_title = st.selectbox("Pick a glossary topic", all_topics())
-        quiz_key = f"topic::{topic_title}"
-        if st.session_state.current_quiz_key != quiz_key:
-            st.session_state.current_quiz_key = quiz_key
-            st.session_state.current_quiz_questions = get_topic_quiz(topic_title)
-    questions = st.session_state.current_quiz_questions
-    if questions:
-        answers = []
-        with st.form(f"quiz_form_{st.session_state.current_quiz_key}"):
-            for i, item in enumerate(questions):
-                st.markdown(f"**Q{i+1}. [{item.get('topic','')}]** {item['q']}")
-                choice = st.radio("choices", item["choices"], key=f"q_{st.session_state.current_quiz_key}_{i}", label_visibility="collapsed")
-                answers.append(item["choices"].index(choice))
-            submitted = st.form_submit_button("Submit Test")
+        render_timer_box()
+        st.caption(f"Quiz started: {st.session_state.quiz_started_at} · Topic: {st.session_state.quiz_topic}")
+        with st.form("quiz_form"):
+            answers = []
+            for idx, q in enumerate(st.session_state.quiz):
+                st.markdown(f"<div class='quiz-card'><b>Q{idx+1}. {q['topic']}</b><br><br>{q['q']}</div>", unsafe_allow_html=True)
+                choice = st.radio("Answer", q['choices'], key=f"qa_{st.session_state.quiz_started_at}_{idx}", label_visibility="collapsed")
+                answers.append(q['choices'].index(choice))
+            submitted = st.form_submit_button("Submit Quiz + Save Time")
+
         if submitted:
-            score = sum(1 for i, item in enumerate(questions) if answers[i] == item["a"])
-            pct = round(score / len(questions) * 100)
-            st.markdown(f"<div class='score-box'><h2>{score}/{len(questions)} — {pct}%</h2></div>", unsafe_allow_html=True)
-            for i, item in enumerate(questions):
-                ok = answers[i] == item["a"]
-                st.markdown(f"**{'Correct' if ok else 'Missed'} — Q{i+1}.** {item['q']}")
-                st.caption(f"Correct answer: {item['choices'][item['a']]} — {item.get('explain','')}")
+            elapsed = current_elapsed()
+            st.session_state.quiz_elapsed_seconds = elapsed
+            score = sum(1 for i, q in enumerate(st.session_state.quiz) if answers[i] == q['a'])
+            total = len(st.session_state.quiz)
+            pct = round(score / total * 100) if total else 0
+            review = []
+            for i, q in enumerate(st.session_state.quiz):
+                review.append({
+                    "question": q['q'],
+                    "topic": q['topic'],
+                    "selected": q['choices'][answers[i]],
+                    "correct": q['choices'][q['a']],
+                    "is_correct": answers[i] == q['a'],
+                    "manual_fact": q.get('explain', ''),
+                    "source": q.get('source', ''),
+                    "page": q.get('page', ''),
+                })
+            save_quiz_log(score, total, pct, st.session_state.quiz_topic, elapsed, review)
+            st.success(f"Score: {score}/{total} — {pct}% · Time: {format_seconds(elapsed)} · Saved to JSON")
+            for i, q in enumerate(st.session_state.quiz):
+                right = answers[i] == q['a']
+                cls = 'correct' if right else 'wrong'
+                st.markdown(f"<div class='quiz-card {cls}'><b>{'Correct' if right else 'Missed'} — Q{i+1}</b><br>{q['q']}<br><br><b>Your answer:</b> {q['choices'][answers[i]]}<br><b>Correct answer:</b> {q['choices'][q['a']]}<br><b>Manual fact:</b> {q.get('explain','')}<br><span class='small-note'>{q.get('source','')} · page {q.get('page','')}</span></div>", unsafe_allow_html=True)
 
 elif page == "My Highlights":
-    st.markdown("## My Highlights")
-    st.caption(f"JSON file: {highlight_file().name}")
-    items = load_highlights()
-    if not items:
-        st.info("No highlights saved yet. Open a glossary topic, paste your favorite part, and save it.")
-    else:
-        for h in items:
-            st.markdown(f"<div class='highlight-card'><b>{h['topic']}</b><br><mark>{h['text']}</mark><br><small>{h.get('note','')}</small><br><em>{h['created_at']}</em></div>", unsafe_allow_html=True)
-            if st.button("Delete highlight", key=f"del_all_{h['id']}"):
-                delete_highlight(h["id"])
-                st.rerun()
-        st.download_button("Download my highlights JSON", data=json.dumps(items, indent=2, ensure_ascii=False), file_name=f"cdl_highlights_{st.session_state.session_uid}.json", mime="application/json")
+    st.subheader("My Colored Highlights")
+    hs = load_highlights()
+    c1, c2 = st.columns(2)
+    with c1:
+        st.download_button("Download highlights JSON", json.dumps(hs, indent=2), file_name=f"cdl_highlights_{owner_id()}.json", mime="application/json")
+    with c2:
+        if st.button("Clear this device/session's highlights"):
+            clear_highlights(); st.rerun()
+    if not hs:
+        st.info("No highlights saved yet.")
+    for h in reversed(hs):
+        color = h.get('color', '#fff2a8')
+        st.markdown(f"<div class='highlight-card' style='background:{color};'><b>{h['title']}</b><br><span class='small-note'>{h['topic']} · {h['source']} page {h['page']} · {h['time']}</span><br><br>{h['text']}<br><br><i>{h.get('note','')}</i></div>", unsafe_allow_html=True)
 
-elif page == "Navigation Center":
-    st.markdown("## 50-State Truck Navigation & Reference Center")
-    tab1, tab2 = st.tabs(["State-by-State Reference", "National Hazard Patterns"])
-    with tab1:
-        search = st.text_input("Filter states")
-        for s in [x for x in get_state_list() if not search or search.lower() in x.lower()]:
-            info = get_state_info(s)
-            st.markdown(f"<div class='state-card'><div class='state-name'>{s}</div><div class='state-note'>{info.get('notes','')}</div></div>", unsafe_allow_html=True)
-            st.markdown(f"[Official DOT site]({info.get('dot_url','#')}) · [Permits / oversize-overweight]({info.get('permit_url','#')})")
-    with tab2:
-        for hz in NATIONAL_HAZARD_PATTERNS:
-            st.markdown(f"<div class='hazard-card'><div class='hazard-region'>{hz['region']}</div><div class='hazard-pattern'>{hz['pattern']}</div></div>", unsafe_allow_html=True)
+elif page == "Quiz History":
+    st.subheader("Quiz History JSON")
+    logs = load_quiz_logs()
+    st.download_button("Download quiz history JSON", json.dumps(logs, indent=2), file_name=f"cdl_quiz_history_{owner_id()}.json", mime="application/json")
+    if not logs:
+        st.info("No quiz attempts saved yet.")
+    for log in reversed(logs[-50:]):
+        st.markdown(f"""
+        <div class='quiz-log-card'>
+          <b>{log['topic']}</b> — {log['score']}/{log['total']} ({log['percent']}%)<br>
+          <span class='small-note'>Time: {log['elapsed_label']} · Started: {log['time_started']} · Saved for {log.get('device_name','device')}</span>
+        </div>
+        """, unsafe_allow_html=True)
 
-elif page == "Pre-Trip Planner":
-    st.markdown("## Pre-Trip Route Planning Workflow")
-    for step in PRETRIP_WORKFLOW:
-        st.markdown(f"<div class='step-card'><div class='step-num'>{step['step']}</div><div><div class='step-title'>{step['title']}</div><div class='step-detail'>{step['detail']}</div></div></div>", unsafe_allow_html=True)
-        st.checkbox(f"Complete: {step['title']}", key=f"pretrip_{step['step']}")
-
-elif page == "Readiness Checklist":
-    st.markdown("## CDL Readiness Checklist")
-    items = [
-        "I know whether I need Class A, B, or C.",
-        "I understand ELDT and verified my provider if needed.",
-        "I can explain air brake checks out loud.",
-        "I can complete a full pre-trip inspection sequence.",
-        "I can plan a legal truck route and avoid parkways/low bridges.",
-        "I scored 90%+ on the master test.",
-    ]
-    checked = sum(1 for item in items if st.checkbox(item))
-    st.progress(checked / len(items))
-    st.caption(f"{checked} of {len(items)} complete")
-
-elif page == "Official Sources":
-    st.markdown("## Official Sources")
-    resources = [
-        ("NY DMV — CDL Manual", "https://dmv.ny.gov/driver-license/commercial-drivers/new-york-state-commercial-drivers-manual"),
-        ("NY DMV — CDL License Steps", "https://dmv.ny.gov/driver-license/commercial-drivers/get-a-commercial-driver-license-cdl"),
-        ("FMCSA — ELDT Overview", "https://www.fmcsa.dot.gov/registration/commercial-drivers-license/entry-level-driver-training-eldt"),
-        ("FMCSA — Training Provider Registry", "https://tpr.fmcsa.dot.gov/"),
-        ("FMCSA — Hours of Service", "https://www.fmcsa.dot.gov/regulations/hours-service"),
-        ("TSA — Hazmat Endorsement", "https://www.tsa.gov/for-industry/hazmat-endorsement"),
-        ("NYC DOT — Truck Routing", "https://www.nyc.gov/html/dot/html/motorist/truckrouting.shtml"),
-    ]
-    for name, url in resources:
-        st.markdown(f"- [{name}]({url})")
+elif page == "Source Coverage":
+    st.subheader("Source Coverage")
+    st.write("This app includes extracted, readable cards from the New York CDL handbook, hazardous materials manual, and current section PDFs, with duplicate text removed where possible.")
+    by = {}
+    for i in items:
+        by.setdefault(i['source'], 0)
+        by[i['source']] += 1
+    for k, v in by.items():
+        st.markdown(f"- **{k}** — {v} readable cards")
+    st.markdown("---")
+    st.caption("Use Accessible Reader search when you need exact rules, ages, numbers, pressures, distances, or definitions from the manuals.")
